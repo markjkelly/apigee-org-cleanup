@@ -1,201 +1,181 @@
-var prompt = require("prompt");
-var colors = require("colors/safe");
 const rp = require("request-promise");
 var util = require("util");
+const { program } = require('commander');
 
-var schema = {
-    properties: {
-      org: {
-        description: colors.yellow("Please provide the Apigee Edge Organization name"),
-        message: colors.red("Apigee Edge Organization name cannot be empty!"),
-        required: true
-      },
-      username: {
-        description: colors.yellow("Please provide the Apigee Edge username"),
-        message: colors.red("Apigee Edge username cannot be empty!"),
-        required: true
-      },
-      password: {
-        description: colors.yellow("Please provide the Apigee Edge password"),
-        message: colors.red("Apigee Edge password cannot be empty!"),
-        hidden: true,  
-        replace: '*',
-        required: true
-      }
-    }
-  };
- 
-//
-// Start the prompt
-//
-prompt.start();
+program
+  .requiredOption('-u, --username <type>', 'username must be specified')
+  .requiredOption('-t, --token <type>', 'token must be specified')
+  .requiredOption('-o, --org <type>', 'organisation must be specified')
+;
 
-prompt.get(schema, async function (err, config) {
-  await deleteAppsAndDevelopers(config);
-  await deleteAPIProducts(config);
-  await deleteReports(config);
-  await deleteSharedFlows(config);
-  await deleteExtensions(config);
-  await deleteAPIProxies(config);
-  await deleteAPIPortals(config);
-  await deleteSpecs(config);
-});
+program.parse(process.argv);
 
-let mgmtURL = "https://api.enterprise.apigee.com/v1/organizations";
-let mgmtOAuthURL = "https://login.apigee.com/oauth/token";
+var config = {username:`${program.username}`, token:`${program.token}`, org:`${program.org}`};
+var mgmtURL = "https://api.enterprise.apigee.com/v1/organizations";
+var mgmtOAuthURL = "https://login.apigee.com/oauth/token";
+
+cleanup();
+
+async function cleanup() {
+	await deleteAppsAndDevelopers(config);
+	await deleteAPIProducts(config);
+	await deleteReports(config)
+	await deleteExtensions(config);
+	await deleteAPIProxies(config);
+	await deleteSharedFlows(config);
+	await deleteAPIPortals(config);
+	await deleteSpecs(config);
+}
 
 async function deleteAppsAndDevelopers(config){
-	safeLog("Deleting Apps");
+	console.log("Deleting Apps");
 	let developers = await getEntities(config, "developers");
 	if (developers == null) {
-		safeLog("Developers: NONE");
+		console.log("Developers: NONE");
 		return;
 	}
-	safeLog("Developers: "+developers);
+	console.log("Developers: "+developers);
 	for (developer of developers){
-		safeLog("Fetching Apps for "+developer);
+		console.log("Fetching Apps for "+developer);
 	  	let apps = await getEntities(config, "developers/"+developer+"/apps");
 			if (apps == null) {
-				safeLog("Apps: NONE");
+				console.log("Apps: NONE");
 				continue;
 			}
-	  	safeLog("Apps: "+apps);
+	  	console.log("Apps: "+apps);
 	  	for (app of apps){
 	  		await deleteEntities(config, "developers/"+developer+"/apps/"+app);
 	  	}
-	  	safeLog("Deleting developer: "+developer);
+	  	console.log("Deleting developer: "+developer);
 	  	await deleteEntities(config, "developers/"+developer);
 	}
 }
 
 async function deleteAPIProducts(config){
-	safeLog("Deleting API Products");
+	console.log("Deleting API Products");
 	let apiproducts = await getEntities(config, "apiproducts");
 	if (apiproducts == null) {
-		safeLog("API Products: NONE");
+		console.log("API Products: NONE");
 		return;
 	}
-	safeLog("API Products: "+apiproducts);
+	console.log("API Products: "+apiproducts);
 	for (apiproduct of apiproducts){
-	  	safeLog("Deleting API Product: "+apiproduct);
+	  	console.log("Deleting API Product: "+apiproduct);
 	  	await deleteEntities(config, "apiproducts/"+apiproduct);
 	}
 }
 
 async function deleteReports(config){
-	safeLog("Deleting Custom Reports");
+	console.log("Deleting Custom Reports");
 	let reports = await getEntities(config, "reports");
 	if (reports == null) {
-		safeLog("Reports: NONE");
+		console.log("Reports: NONE");
 		return;
 	}
 	for (report of reports.qualifier){
-	  	safeLog("Deleting Report: "+report.name);
+	  	console.log("Deleting Report: "+report.name);
 	  	await deleteEntities(config, "reports/"+report.name);
 	}
 }
 
 async function deleteSharedFlows(config){
-	safeLog("Deleting SharedFlows");
+	console.log("Deleting SharedFlows");
 	let sharedFlows = await getEntities(config, "sharedflows");
 	if (sharedFlows == null) {
-		safeLog("Sharedflows: NONE");
+		console.log("Sharedflows: NONE");
 		return;
 	}
-	safeLog("Sharedflows: "+sharedFlows);
+	console.log("Sharedflows: "+sharedFlows);
 	for (sharedFlow of sharedFlows){
 	  	let resp = await getEntities(config, "sharedflows/"+sharedFlow+"/deployments");
 			if (resp == null) {
-				safeLog("Deployments: NONE");
+				console.log("Deployments: NONE");
 				continue;
 			}
 	  	for (e of resp.environment){
 	  		//if(e.name === config.env){
 					if (e == null || e.revision == null || e.revision[0] == null || e.revision[0].name == null) {
-						safeLog("Failed to resolve revision.")
+						console.log("Failed to resolve revision.")
 						continue;
 					}
 	  			let revision = e.revision[0].name;
-	  			safeLog("Undeploying Revision:"+revision+" of sharedflow: "+sharedFlow);
+	  			console.log("Undeploying Revision:"+revision+" of sharedflow: "+sharedFlow);
 	  			await deleteEntities(config, "/environments/"+e.name+"/sharedflows/"+sharedFlow+"/revisions/"+revision+"/deployments");
 	  		//}
 	  	}
-	  	safeLog("Deleting sharedflow: "+sharedFlow);
+	  	console.log("Deleting sharedflow: "+sharedFlow);
 	  	await deleteEntities(config, "sharedflows/"+sharedFlow);
 	}
 }
 
 async function deleteAPIProxies(config){
-	safeLog("Deleting API Proxies");
+	console.log("Deleting API Proxies");
 	let apis = await getEntities(config, "apis");
 	if (apis === null) {
-		safeLog("API Proxies: NONE");
+		console.log("API Proxies: NONE");
 		return;
 	}
 	let ignoreAPIs = ["oauth", "helloworld", "apigee-test_bundle"];
 	apis = apis.filter(item => !ignoreAPIs.includes(item));
-	safeLog("API Proxies: "+apis);
+	console.log("API Proxies: "+apis);
 	for (api of apis){
 	  	let resp = await getEntities(config, "apis/"+api+"/deployments");
 			if (resp === null) {
-				safeLog("Deployments: NONE");
+				console.log("Deployments: NONE");
 				return;
 			}
 	  	for (e of resp.environment){
 	  		//if(e.name === config.env){
 	  			let revision = e.revision[0].name;
-	  			safeLog("Undeploying Revision:"+revision+" of API Proxy: "+api);
+	  			console.log("Undeploying Revision:"+revision+" of API Proxy: "+api);
 	  			await deleteEntities(config, "/environments/"+e.name+"/apis/"+api+"/revisions/"+revision+"/deployments");
 	  		//}
 	  	}
-	  	safeLog("Deleting API Proxy: "+api);
+	  	console.log("Deleting API Proxy: "+api);
 	  	await deleteEntities(config, "apis/"+api);
 	}
 }
 
 async function deleteSpecs(config){
-	safeLog("Deleting Specs");
-	let accessToken = await getAccessToken(config);
-	let specs = await getSpecs(config, accessToken);
-	safeLog(specs);
+	console.log("Deleting Specs");
+	let specs = await getSpecs(config);
+	console.log(specs);
 	for (spec of specs){
-		await deleteSpec(config, accessToken, spec)
+		await deleteSpec(config, spec)
 	}
 }
 
 async function deleteAPIPortals(config){
-	safeLog("Deleting API Portals");
-	let accessToken = await getAccessToken(config);
-	let portals = await getPortals(config, accessToken);
-	safeLog(portals);
+	console.log("Deleting API Portals");
+	let portals = await getPortals(config);
+	console.log(portals);
 	for (portal of portals){
-		await deletePortal(config, accessToken, portal)
+		await deletePortal(config, portal)
 	}
 }
 
 async function deleteExtensions(config){
-	let accessToken = await getAccessToken(config);
 	let envs = ["test", "prod", "portal"];
 	for (env of envs){
-		let extensions = await getAllExtensionsInEnv(config, accessToken, env);
+		let extensions = await getAllExtensionsInEnv(config, config.token, env);
 		if (extensions == null) {
-			safeLog("No extensions found in "+env);
+			console.log("No extensions found in "+env);
 			continue;
 		}
-		safeLog(extensions);
+		console.log(extensions);
 		for (extension of extensions){
-			await undeployExtension(accessToken, extension);
-			await deleteExtension(accessToken, extension);
+			await undeployExtension(config.token, extension);
+			await deleteExtension(config.token, extension);
 		}
 	}
 }
 
-async function getSpecs(config, accessToken){
+async function getSpecs(config){
 	let options = {
 	    method: "GET",
 	    uri: "https://api.enterprise.apigee.com/v1/homeFolder/contents",
 	    headers: {
-        	"Authorization": "Bearer "+accessToken,
+        	"Authorization": "Bearer "+config.token,
         	"X-Org-Name": config.org
     	},
 	    json: true
@@ -210,16 +190,16 @@ async function getSpecs(config, accessToken){
 		return specs;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
-async function getPortals(config, accessToken){
+async function getPortals(config){
 	let options = {
 	    method: "GET",
 	    uri: "https://api.enterprise.apigee.com/v1/portals/api/sites?orgname="+config.org,
 	    headers: {
-        	"Authorization": "Bearer "+accessToken,
+        	"Authorization": "Bearer "+config.token,
         	"X-Org-Name": config.org
     	},
 	    json: true
@@ -234,17 +214,17 @@ async function getPortals(config, accessToken){
 		return portals;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
-async function deleteSpec(config, accessToken, spec){
-	safeLog("Deleting spec: "+spec);
+async function deleteSpec(config, spec){
+	console.log("Deleting spec: "+spec);
 	let options = {
 	    method: "DELETE",
 	    uri: "https://api.enterprise.apigee.com/v1"+spec,
 	    headers: {
-        	"Authorization": "Bearer "+accessToken,
+        	"Authorization": "Bearer "+config.token,
         	"X-Org-Name": config.org
     	},
 	    json: true
@@ -254,18 +234,18 @@ async function deleteSpec(config, accessToken, spec){
 		return parsedBody;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
 
-async function undeployExtension(accessToken, extension){
-	safeLog("Undeploying extensions in "+env+" environment");
+async function undeployExtension(extension){
+	console.log("Undeploying extensions in "+env+" environment");
 	let options = {
 	    method: "PATCH",
 	    uri: extension,
 	    headers: {
-        	"Authorization": "Bearer "+accessToken
+        	"Authorization": "Bearer "+config.token
     	},
     	body: {
         	state: "UNDEPLOYED"
@@ -277,16 +257,16 @@ async function undeployExtension(accessToken, extension){
 		return parsedBody;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
-async function getAllExtensionsInEnv(config, accessToken, env){
+async function getAllExtensionsInEnv(config, env){
 	let options = {
 	    method: "GET",
 	    uri: "https://api.enterprise.apigee.com/v1/organizations/"+config.org+"/environments/"+env+"/extensions",
 	    headers: {
-        	"Authorization": "Bearer "+accessToken
+        	"Authorization": "Bearer "+config.token
     	},
 	    json: true
 	};
@@ -300,16 +280,16 @@ async function getAllExtensionsInEnv(config, accessToken, env){
 		return extensions;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
-async function deleteExtension(accessToken, extension){
+async function deleteExtension(extension){
 	let options = {
 	    method: "DELETE",
 	    uri: extension,
 	    headers: {
-        	"Authorization": "Bearer "+accessToken
+        	"Authorization": "Bearer "+config.token
     	},
 	    json: true
 	};
@@ -318,17 +298,17 @@ async function deleteExtension(accessToken, extension){
 		return parsedBody;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
-async function deletePortal(config, accessToken, portal){
-	safeLog("Deleting API Portal: "+portal);
+async function deletePortal(config, portal){
+	console.log("Deleting API Portal: "+portal);
 	let options = {
 	    method: "POST",
 	    uri: "https://apigee.com/portals/api/sites/"+portal+"/trash",
 	    headers: {
-        	"Authorization": "Bearer "+accessToken,
+        	"Authorization": "Bearer "+config.token,
         	"X-Org-Name": config.org
     	},
 	    json: true
@@ -338,40 +318,39 @@ async function deletePortal(config, accessToken, portal){
 		return parsedBody;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
 
 async function getEntities(config, entity){
-	//safeLog("Fetching "+entity+" from Apigee org: "+config.org);
-	let auth = Buffer.from(config.username+":"+config.password).toString('base64')
+	//console.log("Fetching "+entity+" from Apigee org: "+config.org);
 	let options = {
 	    method: "GET",
 	    uri: mgmtURL+"/"+config.org+"/"+entity,
 	    headers: {
-        	"Authorization": "Basic "+auth
+			"Authorization": "Bearer "+config.token
     	},
 	    json: true
 	};
 	try{
 		let parsedBody = await rp(options);
+		console.log(parsedBody);
 		return parsedBody;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 		return null;
 	}
 }
 
 async function deleteEntities(config, entity){
-	safeLog("Deleting "+entity+" from Apigee org: "+config.org);
-	let auth = Buffer.from(config.username+":"+config.password).toString('base64')
+	console.log("Deleting "+entity+" from Apigee org: "+config.org);
 	let options = {
 	    method: "DELETE",
 	    uri: mgmtURL+"/"+config.org+"/"+entity,
 	    headers: {
-        	"Authorization": "Basic "+auth
+        	"Authorization": "Bearer "+config.token
     	},
 	    json: true
 	};
@@ -380,12 +359,12 @@ async function deleteEntities(config, entity){
 		return parsedBody;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
 
 async function getAccessToken(config){
-	safeLog("Getting OAuth Access token");
+	console.log("Getting OAuth Access token");
 	let options = {
 	    method: "POST",
 	    uri: mgmtOAuthURL,
@@ -404,13 +383,6 @@ async function getAccessToken(config){
 		return accessToken;
 	}
 	catch(err){
-		safeLog(err);
+		console.log(err);
 	}
 }
-
-// strip Basic auth from logging
-function safeLog(obj) {
-	let str = util.inspect(obj);
-	console.log(str.replace(/Basic [+/A-Za-z0-9]+/g,'Basic ******'));
-}
-
